@@ -2,62 +2,15 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>Firebase Auth + Firestore + Storage</title>
-
+<title>Firebase Auth + Firestore + Base64 Images</title>
 <style>
-body {
-  font-family: Arial, sans-serif;
-  background: #f4f7f6;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 20px;
-}
-
-.container {
-  width: 100%;
-  max-width: 500px;
-  background: white;
-  padding: 20px;
-  border-radius: 12px;
-  box-shadow: 0 4px 15px rgba(0,0,0,0.05);
-  margin-bottom: 20px;
-}
-
-button {
-  background: #007bff;
-  color: white;
-  border: none;
-  padding: 10px;
-  border-radius: 6px;
-  width: 100%;
-  cursor: pointer;
-  margin-top: 10px;
-}
-
-#logoutBtn {
-  background: #ff4757;
-}
-
-input {
-  width: 100%;
-  padding: 10px;
-  margin: 8px 0;
-}
-
-.post {
-  background: white;
-  border: 1px solid #ddd;
-  padding: 15px;
-  margin-bottom: 10px;
-  border-radius: 8px;
-}
-
-.post img {
-  width: 100%;
-  border-radius: 8px;
-  margin-top: 10px;
-}
+body { font-family: Arial; background: #f4f7f6; display:flex; flex-direction:column; align-items:center; padding:20px; }
+.container { width:100%; max-width:500px; background:white; padding:20px; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,0.05); margin-bottom:20px; }
+button { background:#007bff; color:white; border:none; padding:10px; border-radius:6px; width:100%; cursor:pointer; margin-top:10px; }
+#logoutBtn { background:#ff4757; }
+input { width:100%; padding:10px; margin:8px 0; }
+.post { background:white; border:1px solid #ddd; padding:15px; margin-bottom:10px; border-radius:8px; }
+.post img { width:100%; border-radius:8px; margin-top:10px; }
 </style>
 </head>
 <body>
@@ -81,22 +34,16 @@ input {
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js";
 import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, updateDoc, doc, increment, deleteDoc } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-auth.js";
-import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-storage.js";
 
-/* 🔥 ВАЖНО — правильный bucket */
+// 🔥 Firebase Config
 const firebaseConfig = {
   apiKey: "ТВОЙ_API_KEY",
   authDomain: "qwertyui-1eb9f.firebaseapp.com",
   projectId: "qwertyui-1eb9f",
-  storageBucket: "qwertyui-1eb9f.appspot.com",
-  messagingSenderId: "507498046800",
-  appId: "1:507498046800:web:9b58732dbb6e2c3bbaf855"
 };
-
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
-const storage = getStorage(app);
 const provider = new GoogleAuthProvider();
 
 const loginBtn = document.getElementById("loginBtn");
@@ -106,8 +53,7 @@ const imageInput = document.getElementById("imageInput");
 const preview = document.getElementById("preview");
 const publishBtn = document.getElementById("publishBtn");
 
-/* ===== Авторизация ===== */
-
+// ===== Авторизация =====
 loginBtn.onclick = () => signInWithPopup(auth, provider);
 logoutBtn.onclick = () => signOut(auth);
 
@@ -116,7 +62,6 @@ onAuthStateChanged(auth, user => {
     loginBtn.style.display = "none";
     logoutBtn.style.display = "block";
     formContainer.style.display = "block";
-
     document.getElementById("name").value = user.displayName;
     document.getElementById("email").value = user.email;
   } else {
@@ -126,8 +71,7 @@ onAuthStateChanged(auth, user => {
   }
 });
 
-/* ===== Preview ===== */
-
+// ===== Preview =====
 imageInput.onchange = e => {
   const file = e.target.files[0];
   if (!file) return;
@@ -135,29 +79,32 @@ imageInput.onchange = e => {
   preview.style.display = "block";
 };
 
-/* ===== Публикация ===== */
-
+// ===== Публикация с Base64 =====
 publishBtn.onclick = async () => {
   const user = auth.currentUser;
   if (!user) return alert("Войдите");
 
-  let imageUrl = null;
+  let imageData = null;
   let imageName = null;
 
   try {
     if (imageInput.files.length > 0) {
       const file = imageInput.files[0];
       imageName = file.name;
-      const storageRef = ref(storage, `images/${user.uid}_${Date.now()}_${file.name}`);
-      await uploadBytes(storageRef, file);
-      imageUrl = await getDownloadURL(storageRef);
-      console.log("Image URL:", imageUrl);
+
+      // Преобразуем файл в Base64
+      imageData = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = error => reject(error);
+        reader.readAsDataURL(file);
+      });
     }
 
     await addDoc(collection(db, "requests"), {
       name: user.displayName,
       email: user.email,
-      image: imageUrl,
+      image: imageData,       // Base64 вместо Storage
       imageName: imageName,
       likes: 0,
       timestamp: serverTimestamp()
@@ -172,8 +119,7 @@ publishBtn.onclick = async () => {
   }
 };
 
-/* ===== Лента ===== */
-
+// ===== Лента =====
 const q = query(collection(db, "requests"), orderBy("timestamp", "desc"));
 
 onSnapshot(q, snapshot => {
@@ -182,10 +128,8 @@ onSnapshot(q, snapshot => {
 
   snapshot.forEach(docItem => {
     const data = docItem.data();
-
     const div = document.createElement("div");
     div.className = "post";
-
     div.innerHTML = `
       <b>${data.name}</b>
       <p>${data.email}</p>
@@ -193,23 +137,13 @@ onSnapshot(q, snapshot => {
       <button onclick="likePost('${docItem.id}')">👍 ${data.likes || 0}</button>
       <button onclick="deletePost('${docItem.id}')">🗑</button>
     `;
-
     feed.appendChild(div);
   });
 });
 
-/* ===== Лайк и удаление ===== */
-
-window.likePost = async id => {
-  await updateDoc(doc(db, "requests", id), {
-    likes: increment(1)
-  });
-};
-
-window.deletePost = async id => {
-  await deleteDoc(doc(db, "requests", id));
-};
-
+// ===== Лайк и удаление =====
+window.likePost = async id => { await updateDoc(doc(db, "requests", id), { likes: increment(1) }); };
+window.deletePost = async id => { await deleteDoc(doc(db, "requests", id)); };
 </script>
 </body>
 </html>
