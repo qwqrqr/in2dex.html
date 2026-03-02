@@ -198,20 +198,31 @@ document.getElementById("mainBtn").onclick = async () => {
     const file = imageInput.files[0];
     imageName = file.name;
     const storageRef = ref(storage, `images/${user.uid}_${Date.now()}_${file.name}`);
-    await uploadBytes(storageRef, file);
-    imageUrl = await getDownloadURL(storageRef);
+    try {
+      await uploadBytes(storageRef, file);
+      imageUrl = await getDownloadURL(storageRef);
+    } catch (err) {
+      console.error("Ошибка загрузки файла:", err);
+      alert("Ошибка загрузки картинки");
+      return;
+    }
   }
 
-  await addDoc(collection(db, "requests"), {
-    name: user.displayName,
-    email: user.email,
-    likes: 0,
-    timestamp: serverTimestamp(),
-    image: imageUrl,
-    imageName: imageName
-  });
+  try {
+    await addDoc(collection(db, "requests"), {
+      name: user.displayName,
+      email: user.email,
+      likes: 0,
+      timestamp: serverTimestamp(),
+      image: imageUrl,
+      imageName: imageName
+    });
+  } catch (err) {
+    console.error("Ошибка публикации:", err);
+    alert("Ошибка публикации в Firestore");
+    return;
+  }
 
-  // очистка формы
   imageInput.value = "";
   preview.style.display = "none";
 };
