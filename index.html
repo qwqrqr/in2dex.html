@@ -14,11 +14,11 @@ button { background: #007bff; color: white; border: none; padding: 12px; border-
 button:hover { background: #0056b3; }
 button:disabled { background: #ccc; }
 .logout-btn { background: #ff4757; padding: 8px 15px; width: auto; font-size: 14px; }
-.post { background: #ff6f; border: 1px solid #eaeaea; padding: 15px; margin-top: 15px; border-radius: 8px; width: 100%; position: relative;}
+.post { background: #fff; border: 1px solid #eaeaea; padding: 15px; margin-top: 15px; border-radius: 8px; width: 100%; position: relative;}
 .post-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .post-avatar { width: 30px; height: 30px; border-radius: 50%; }
 .like-btn { cursor: pointer; border: none; background: #f8f9fa; padding: 5px 12px; border-radius: 20px; margin-top: 10px; }
-.delete-btn { cursor: pointer; border: none; background: #ff4757; color: white; padding: 5px 10px; border-radius: 5px; font-size: 12px; position: absolute; top: 10px; right: 10px; }
+.delete-btn { cursor: pointer; border: none; background: #ff4757; color: white; padding: 5px 10px; border-radius: 5px; font-size: 12px; position: absolute; top: 10px; right: 10px; z-index: 10; }
 .time { font-size: 11px; color: #999; margin-left: auto; }
 .post img { max-width:100%; margin-top:10px; border-radius:8px; }
 </style>
@@ -54,8 +54,9 @@ import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, serverTim
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-auth.js";
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-storage.js";
 
+// 🔥 Вставь сюда свой Firebase Config
 const firebaseConfig = {
-  apiKey: "AIzaSyDFbUMQFzMG_tBml3OfS7OMCPdK_1zO_jE",
+apiKey: "AIzaSyDFbUMQFzMG_tBml3OfS7OMCPdK_1zO_jE",
   authDomain: "qwertyui-1eb9f.firebaseapp.com",
   projectId: "qwertyui-1eb9f",
   storageBucket: "qwertyui-1eb9f.firebasestorage.app",
@@ -70,6 +71,7 @@ const auth = getAuth(app);
 const provider = new GoogleAuthProvider();
 const storage = getStorage(app);
 
+// Элементы
 const loginBtn = document.getElementById('loginBtn');
 const logoutBtn = document.getElementById('logoutBtn');
 const userInfo = document.getElementById('userInfo');
@@ -82,6 +84,7 @@ const contentInput = document.getElementById('content');
 const postBtn = document.getElementById('postBtn');
 const feed = document.getElementById('feed');
 
+// Авторизация
 loginBtn.onclick = () => signInWithPopup(auth, provider);
 logoutBtn.onclick = () => signOut(auth);
 
@@ -92,7 +95,7 @@ onAuthStateChanged(auth, (user) => {
     messageForm.style.display = "block";
 
     userNameElem.textContent = user.displayName;
-    userPhotoElem.src = user.photoURL ;
+    userPhotoElem.src = user.photoURL || 'https://via.placeholder.com/40';
     nameInput.value = user.displayName;
     emailInput.value = user.email;
   } else {
@@ -102,6 +105,7 @@ onAuthStateChanged(auth, (user) => {
   }
 });
 
+// Публикация поста с изображением
 postBtn.onclick = async () => {
   const content = contentInput.value.trim();
   const file = document.getElementById('imageInput').files[0];
@@ -137,6 +141,7 @@ postBtn.onclick = async () => {
   }
 };
 
+// Лента постов в реальном времени
 const q = query(collection(db, "requests"), orderBy("timestamp", "desc"));
 onSnapshot(q, (snapshot) => {
   feed.innerHTML = "";
@@ -153,16 +158,19 @@ onSnapshot(q, (snapshot) => {
       <p>${data.text || ''}</p>
       ${data.image ? `<img src="${data.image}">` : ''}
       <button class="like-btn" onclick="processLike('${docItem.id}')">👍 ${data.likes || 0}</button>
-      ${auth.currentUser && auth.currentUser.uid === data.uid ? `<button class="delete-btn" onclick="deletePost('${docItem.id}','${data.image}')">Удалить</button>` : ''}
+      ${auth.currentUser && auth.currentUser.uid === data.uid ? 
+        `<button class="delete-btn" onclick="deletePost('${docItem.id}','${data.image}')">Удалить</button>` : ''}
     `;
     feed.appendChild(postDiv);
   });
 });
 
+// Лайк
 window.processLike = async (id) => {
   await updateDoc(doc(db, "requests", id), { likes: increment(1) });
 };
 
+// Удаление поста
 window.deletePost = async (id, imageUrl) => {
   if(!confirm("Удалить этот пост?")) return;
   try {
