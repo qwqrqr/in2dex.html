@@ -107,6 +107,8 @@ onAuthStateChanged(auth, async user => {
 // ===== СОЗДАТЬ ТЕСТОВЫЙ ПОСТ =====
 publishBtn.onclick = async () => {
   const user = auth.currentUser;
+  if (!user) return alert("Войдите чтобы создать пост");
+
   await addDoc(collection(db, "requests"), {
     uid: user.uid,
     name: user.displayName,
