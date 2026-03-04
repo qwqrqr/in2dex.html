@@ -2,15 +2,15 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>Firebase Auth + Firestore + Base64 Images</title>
+<title>Firebase DM App</title>
 <style>
-body { font-family: Arial; background: #f4f7f6; display:flex; flex-direction:column; align-items:center; padding:20px; }
-.container { width:100%; max-width:500px; background:white; padding:20px; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,0.05); margin-bottom:20px; }
-button { background:#007bff; color:white; border:none; padding:10px; border-radius:6px; width:100%; cursor:pointer; margin-top:10px; }
-#logoutBtn { background:#ff4757; }
-input { width:100%; padding:10px; margin:8px 0; }
-.post { background:white; border:1px solid #ddd; padding:15px; margin-bottom:10px; border-radius:8px; }
-.post img { width:100%; border-radius:8px; margin-top:10px; }
+body { font-family: Arial; background:#f4f7f6; padding:20px; }
+.container { max-width:600px; margin:auto; background:white; padding:20px; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,0.05); margin-bottom:20px; }
+button { padding:8px; margin-top:5px; cursor:pointer; }
+.post { border:1px solid #ddd; padding:10px; margin-bottom:10px; border-radius:8px; }
+#chatBox { border:1px solid #ccc; padding:10px; height:300px; overflow-y:auto; margin-bottom:10px; }
+.my { text-align:right; color:blue; }
+.other { text-align:left; color:black; }
 </style>
 </head>
 <body>
@@ -20,24 +20,37 @@ input { width:100%; padding:10px; margin:8px 0; }
   <button id="logoutBtn" style="display:none;">Выйти</button>
 </div>
 
-<div class="container" id="formContainer" style="display:none;">
-  <input type="text" id="name" readonly>
-  <input type="email" id="email" readonly>
-  <input type="file" id="imageInput" accept="image/*">
-  <img id="preview" style="display:none;">
-  <button id="publishBtn">Опубликовать</button>
+<div class="container" id="postContainer" style="display:none;">
+  <button id="publishBtn">Создать тестовый пост</button>
 </div>
 
-<div id="feed" style="max-width:500px; width:100%;"></div>
+<div class="container">
+  <h3>Лента</h3>
+  <div id="feed"></div>
+</div>
+
+<div class="container" id="chatContainer" style="display:none;">
+  <h3>Чат</h3>
+  <div id="chatBox"></div>
+  <input id="messageInput" placeholder="Сообщение">
+  <button id="sendBtn">Отправить</button>
+</div>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js";
-import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, updateDoc, doc, increment, deleteDoc } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-auth.js";
+import { 
+  getFirestore, collection, addDoc, doc, setDoc, getDoc,
+  query, orderBy, onSnapshot, serverTimestamp,
+  updateDoc, where
+} from "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
+import { 
+  getAuth, GoogleAuthProvider, signInWithPopup,
+  signOut, onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/10.7.0/firebase-auth.js";
 
-// 🔥 Firebase Config
+// 🔥 ВСТАВЬ СВОЙ CONFIG
 const firebaseConfig = {
- apiKey: "AIzaSyDFbUMQFzMG_tBml3OfS7OMCPdK_1zO_jE",
+  apiKey: "AIzaSyDFbUMQFzMG_tBml3OfS7OMCPdK_1zO_jE",
   authDomain: "qwertyui-1eb9f.firebaseapp.com",
   projectId: "qwertyui-1eb9f",
   storageBucket: "qwertyui-1eb9f.firebasestorage.app",
@@ -45,6 +58,7 @@ const firebaseConfig = {
   appId: "1:507498046800:web:9b58732dbb6e2c3bbaf855",
   measurementId: "G-Z4DGBDF1NK"
 };
+
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
@@ -52,102 +66,135 @@ const provider = new GoogleAuthProvider();
 
 const loginBtn = document.getElementById("loginBtn");
 const logoutBtn = document.getElementById("logoutBtn");
-const formContainer = document.getElementById("formContainer");
-const imageInput = document.getElementById("imageInput");
-const preview = document.getElementById("preview");
+const postContainer = document.getElementById("postContainer");
 const publishBtn = document.getElementById("publishBtn");
+const feed = document.getElementById("feed");
+const chatContainer = document.getElementById("chatContainer");
+const chatBox = document.getElementById("chatBox");
+const sendBtn = document.getElementById("sendBtn");
 
-// ===== Авторизация =====
+let currentChatId = null;
+
+// ===== AUTH =====
 loginBtn.onclick = () => signInWithPopup(auth, provider);
 logoutBtn.onclick = () => signOut(auth);
 
-onAuthStateChanged(auth, user => {
+onAuthStateChanged(auth, async user => {
   if (user) {
     loginBtn.style.display = "none";
     logoutBtn.style.display = "block";
-    formContainer.style.display = "block";
-    document.getElementById("name").value = user.displayName;
-    document.getElementById("email").value = user.email;
+    postContainer.style.display = "block";
+
+    // сохраняем пользователя
+    await setDoc(doc(db, "users", user.uid), {
+      uid: user.uid,
+      name: user.displayName,
+      email: user.email,
+      photoURL: user.photoURL,
+      createdAt: serverTimestamp()
+    }, { merge:true });
+
+    loadPosts();
+
   } else {
     loginBtn.style.display = "block";
     logoutBtn.style.display = "none";
-    formContainer.style.display = "none";
+    postContainer.style.display = "none";
   }
 });
 
-// ===== Preview =====
-imageInput.onchange = e => {
-  const file = e.target.files[0];
-  if (!file) return;
-  preview.src = URL.createObjectURL(file);
-  preview.style.display = "block";
-};
-
-// ===== Публикация с Base64 =====
+// ===== СОЗДАТЬ ТЕСТОВЫЙ ПОСТ =====
 publishBtn.onclick = async () => {
   const user = auth.currentUser;
-  if (!user) return alert("Войдите");
-
-  let imageData = null;
-  let imageName = null;
-
-  try {
-    if (imageInput.files.length > 0) {
-      const file = imageInput.files[0];
-      imageName = file.name;
-
-      // Преобразуем файл в Base64
-      imageData = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = error => reject(error);
-        reader.readAsDataURL(file);
-      });
-    }
-
-    await addDoc(collection(db, "requests"), {
-      name: user.displayName,
-      email: user.email,
-      image: imageData,       // Base64 вместо Storage
-      imageName: imageName,
-      likes: 0,
-      timestamp: serverTimestamp()
-    });
-
-    imageInput.value = "";
-    preview.style.display = "none";
-
-  } catch (err) {
-    console.error(err);
-    alert("Ошибка публикации");
-  }
+  await addDoc(collection(db, "requests"), {
+    uid: user.uid,
+    name: user.displayName,
+    email: user.email,
+    timestamp: serverTimestamp()
+  });
 };
 
-// ===== Лента =====
-const q = query(collection(db, "requests"), orderBy("timestamp", "desc"));
+// ===== ЛЕНТА =====
+function loadPosts() {
+  const q = query(collection(db, "requests"), orderBy("timestamp", "desc"));
 
-onSnapshot(q, snapshot => {
-  const feed = document.getElementById("feed");
-  feed.innerHTML = "";
-
-  snapshot.forEach(docItem => {
-    const data = docItem.data();
-    const div = document.createElement("div");
-    div.className = "post";
-    div.innerHTML = `
-      <b>${data.name}</b>
-      <p>${data.email}</p>
-      ${data.image ? `<p>${data.imageName}</p><img src="${data.image}">` : ""}
-      <button onclick="likePost('${docItem.id}')">👍 ${data.likes || 0}</button>
-      <button onclick="deletePost('${docItem.id}')">🗑</button>
-    `;
-    feed.appendChild(div);
+  onSnapshot(q, snapshot => {
+    feed.innerHTML = "";
+    snapshot.forEach(docItem => {
+      const data = docItem.data();
+      const div = document.createElement("div");
+      div.className = "post";
+      div.innerHTML = `
+        <b>${data.name}</b><br>
+        ${data.email}<br>
+        <button onclick="openChat('${data.uid}')">💬 Написать</button>
+      `;
+      feed.appendChild(div);
+    });
   });
-});
+}
 
-// ===== Лайк и удаление =====
-window.likePost = async id => { await updateDoc(doc(db, "requests", id), { likes: increment(1) }); };
-window.deletePost = async id => { await deleteDoc(doc(db, "requests", id)); };
+// ===== ОТКРЫТЬ ЧАТ =====
+window.openChat = async (receiverUid) => {
+  const user = auth.currentUser;
+  if (receiverUid === user.uid) return alert("Нельзя писать себе");
+
+  const chatId = [user.uid, receiverUid].sort().join("_");
+  currentChatId = chatId;
+
+  const chatRef = doc(db, "chats", chatId);
+  const chatSnap = await getDoc(chatRef);
+
+  if (!chatSnap.exists()) {
+    await setDoc(chatRef, {
+      participants: [user.uid, receiverUid],
+      lastMessage: "",
+      updatedAt: serverTimestamp()
+    });
+  }
+
+  chatContainer.style.display = "block";
+  loadMessages(chatId);
+};
+
+// ===== ЗАГРУЗКА СООБЩЕНИЙ =====
+function loadMessages(chatId) {
+  const q = query(
+    collection(db, "chats", chatId, "messages"),
+    orderBy("timestamp", "asc")
+  );
+
+  onSnapshot(q, snapshot => {
+    chatBox.innerHTML = "";
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      const p = document.createElement("p");
+      p.className = data.senderId === auth.currentUser.uid ? "my" : "other";
+      p.textContent = data.text;
+      chatBox.appendChild(p);
+    });
+  });
+}
+
+// ===== ОТПРАВКА =====
+sendBtn.onclick = async () => {
+  const input = document.getElementById("messageInput");
+  const text = input.value.trim();
+  if (!text) return;
+
+  await addDoc(collection(db, "chats", currentChatId, "messages"), {
+    text,
+    senderId: auth.currentUser.uid,
+    timestamp: serverTimestamp()
+  });
+
+  await updateDoc(doc(db, "chats", currentChatId), {
+    lastMessage: text,
+    updatedAt: serverTimestamp()
+  });
+
+  input.value = "";
+};
 </script>
 </body>
 </html>
