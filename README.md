@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Облачное приложение</title>
+<style>
+body { font-family: 'Inter', sans-serif; background: #f4f7f6; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+.container { width: 100%; max-width: 500px; background: white; padding: 25px; border-radius: 12px; box-shadow:0 4px 15px rgba(0,0,0,0.05); margin-bottom: 20px; }
+.auth-bar { background: white; padding: 15px; border-radius: 12px; margin-bottom: 0px; display: flex; align-items: center; gap: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+.user-avatar { width: 40px; height: 40px; border-radius: 50%; border: 2px solid #007bff; }
+input { width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; }
+button { background: #007bff; color: white; border: none; padding: 12px; border-radius: 5px; width: 100%; font-weight: 600; cursor: pointer; transition: 0.3s; }
+button:hover { background: #0056b3; }
+button:disabled { background: #ccc; }
+.logout-btn { background: #ff4757; padding: 8px 15px; width: auto; font-size: 14px; }
+.post { background: #fff; border: 1px solid #eaeaea; padding: 15px; margin-top: 15px; border-radius: 8px; width: 100%; }
+.post-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.post-avatar { width: 30px; height: 30px; border-radius: 50%; }
+.like-btn { cursor: pointer; border: none; background: #f8f9fa; padding: 5px 12px; border-radius: 20px; margin-top: 10px; }
+.time { font-size: 11px; color: #999; margin-left: auto; }
+</style>
+</head>
+<body>
+
+<div id="authSection" class="container" style="text-align:center;">
+  <button id="loginBtn">Войти через Google</button>
+  <div id="userInfo" style="display: none;" class="auth-bar">
+    <img id="userPhoto" class="user-avatar" src="" alt="Avatar">
+    <span id="userName" style="font-weight: bold;"></span>
+    <button id="logoutBtn" class="logout-btn">Выйти</button>
+  </div>
+</div>
+
+<div id="messageForm" class="container" style="display: none;">
+  <h3>Создать запись</h3>
+  <input type="text" id="name" placeholder="Имя профиля" readonly>
+  <input type="email" id="email" placeholder="Ваш Email" readonly>
+  <input type="text" id="content" placeholder="Что у вас нового?">
+  <button id="postBtn">Опубликовать в облако</button>
+</div>
+
+<div id="feed" class="container" style="width:100%; max-width:500px;"></div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js";
+import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, updateDoc, doc, increment } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
+import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-auth.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDFbUMQFzMG_tBml3OfS7OMCPdK_1zO_jE",
+  authDomain: "qwertyui-1eb9f.firebaseapp.com",
+  projectId: "qwertyui-1eb9f",
+  storageBucket: "qwertyui-1eb9f.firebasestorage.app",
+  messagingSenderId: "507498046800",
+  appId: "1:507498046800:web:9b58732dbb6e2c3bbaf855",
+  measurementId: "G-Z4DGBDF1NK"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const auth = getAuth(app);
+const provider = new GoogleAuthProvider();
+
+// Элементы
+const loginBtn = document.getElementById('loginBtn');
+const logoutBtn = document.getElementById('logoutBtn');
+const userInfo = document.getElementById('userInfo');
+const messageForm = document.getElementById('messageForm');
+const userNameElem = document.getElementById('userName');
+const userPhotoElem = document.getElementById('userPhoto');
+const nameInput = document.getElementById('name');
+const emailInput = document.getElementById('email');
+const contentInput = document.getElementById('content');
+const postBtn = document.getElementById('postBtn');
+const feed = document.getElementById('feed');
+
+// Авторизация
+loginBtn.onclick = () => signInWithPopup(auth, provider);
+logoutBtn.onclick = () => signOut(auth);
+
+onAuthStateChanged(auth, (user) => {
+  if(user){
+    loginBtn.style.display = "none";
+    userInfo.style.display = "flex";
+    messageForm.style.display = "block";
+
+    userNameElem.textContent = user.displayName;
+    userPhotoElem.src = user.photoURL || 'https://via.placeholder.com/40';
+    nameInput.value = user.displayName;
+    emailInput.value = user.email;
+  } else {
+    loginBtn.style.display = "inline-block";
+    userInfo.style.display = "none";
+    messageForm.style.display = "none";
+  }
+});
+
+// Публикация поста
+postBtn.onclick = async () => {
+  const content = contentInput.value.trim();
+  if(!content) return alert("Введите текст сообщения!");
+
+  try {
+    await addDoc(collection(db, "requests"), {
+      name: auth.currentUser.displayName,
+      email: auth.currentUser.email,
+      photo: auth.currentUser.photoURL || '',
+      text: content,
+      likes: 0,
+      timestamp: serverTimestamp()
+    });
+    contentInput.value = "";
+  } catch(e){
+    alert("Ошибка! Проверьте правила безопасности Firebase.");
+  }
+};
+
+// Лента постов в реальном времени
+const q = query(collection(db, "requests"), orderBy("timestamp", "desc"));
+onSnapshot(q, (snapshot) => {
+  feed.innerHTML = "";
+  snapshot.forEach(docItem => {
+    const data = docItem.data();
+    const postDiv = document.createElement("div");
+    postDiv.className = "post";
+    postDiv.innerHTML = `
+      <div class="post-header">
+        <img src="${data.photo || 'https://via.placeholder.com/30'}" class="post-avatar">
+        <b>${data.name}</b>
+        <span class="time">${data.timestamp ? data.timestamp.toDate().toLocaleTimeString() : ''}</span>
+      </div>
+      <p>${data.text}</p>
+      <button class="like-btn" onclick="processLike('${docItem.id}')">${data.likes || 0} 👍</button>
+    `;
+    feed.appendChild(postDiv);
+  });
+});
+
+// Лайк
+window.processLike = async (id) => {
+  await updateDoc(doc(db, "requests", id), { likes: increment(1) });
+};
+</script>
+</body>
+</html>
