@@ -4,35 +4,61 @@
 <meta charset="UTF-8">
 <title>Firebase DM App</title>
 <style>
-body { font-family: Arial; background:#f4f7f6; padding:20px; }
-.container { max-width:600px; margin:auto; background:white; padding:20px; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,0.05); margin-bottom:20px; }
-button { padding:8px; margin-top:5px; cursor:pointer; }
-.post { border:1px solid #ddd; padding:10px; margin-bottom:10px; border-radius:8px; }
-#chatBox { border:1px solid #ccc; padding:10px; height:300px; overflow-y:auto; margin-bottom:10px; }
-.my { text-align:right; color:blue; }
-.other { text-align:left; color:black; }
+/* === Общие стили === */
+body { font-family: 'Segoe UI', Arial, sans-serif; background:#eef2f7; margin:0; padding:0; }
+header { background:#4e73df; color:white; padding:15px; text-align:center; font-size:1.5em; }
+.container { max-width:900px; margin:20px auto; padding:20px; background:white; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,0.1); }
+button { cursor:pointer; padding:8px 12px; border:none; border-radius:6px; background:#4e73df; color:white; margin:5px; transition:0.2s; }
+button:hover { background:#2e59d9; }
+.post { border:1px solid #ddd; padding:12px; margin-bottom:12px; border-radius:10px; background:#f8f9fc; }
+.post b { font-size:1.1em; }
+.post-actions { margin-top:8px; }
+#tabs button { margin-right:5px; background:#6c757d; }
+#tabs button.active { background:#4e73df; }
+
+/* === Лента и чат === */
+#chatBox { border:1px solid #ccc; padding:10px; height:300px; overflow-y:auto; margin-bottom:10px; border-radius:8px; background:#f1f3f5; }
+.my { text-align:right; color:blue; margin:3px 0; }
+.other { text-align:left; color:black; margin:3px 0; }
+input, textarea { width:100%; padding:8px; border-radius:6px; border:1px solid #ccc; margin-top:5px; box-sizing:border-box; }
+
+/* === Секции === */
+.section { display:none; }
 </style>
 </head>
 <body>
 
-<div class="container">
+<header>🔥 Firebase DM App</header>
+
+<div class="container" id="authContainer">
   <button id="loginBtn">Войти через Google</button>
   <button id="logoutBtn" style="display:none;">Выйти</button>
 </div>
 
-<div class="container" id="postContainer" style="display:none;">
-  <button id="publishBtn">Создать тестовый пост</button>
+<div class="container" id="tabs" style="display:none;">
+  <button id="myPostsTab" class="active">Мои посты</button>
+  <button id="feedTab">Лента пользователей</button>
+  <button id="chatTab">Чат</button>
 </div>
 
-<div class="container">
-  <h3>Лента</h3>
-  <div id="feed"></div>
+<!-- === Мои посты === -->
+<div class="container section" id="myPostsSection">
+  <h3>Мои посты</h3>
+  <button id="createPostBtn">Создать пост</button>
+  <div id="myPosts"></div>
 </div>
 
-<div class="container" id="chatContainer" style="display:none;">
+<!-- === Лента других пользователей === -->
+<div class="container section" id="feedSection">
+  <h3>Лента пользователей</h3>
+  <div id="feedPosts"></div>
+</div>
+
+<!-- === Чат === -->
+<div class="container section" id="chatSection">
   <h3>Чат</h3>
   <div id="chatBox"></div>
-  <input id="messageInput" placeholder="Сообщение">
+  <input id="messageInput" placeholder="Введите сообщение">
   <button id="sendBtn">Отправить</button>
 </div>
 
@@ -40,15 +66,14 @@ button { padding:8px; margin-top:5px; cursor:pointer; }
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js";
 import { 
   getFirestore, collection, addDoc, doc, setDoc, getDoc,
-  query, orderBy, onSnapshot, serverTimestamp,
-  updateDoc, where
+  query, orderBy, onSnapshot, serverTimestamp, updateDoc, deleteDoc, arrayUnion
 } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
 import { 
   getAuth, GoogleAuthProvider, signInWithPopup,
   signOut, onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-auth.js";
 
-// 🔥 ВСТАВЬ СВОЙ CONFIG
+// 🔥 Вставь свой Firebase config
 const firebaseConfig = {
   apiKey: "AIzaSyDFbUMQFzMG_tBml3OfS7OMCPdK_1zO_jE",
   authDomain: "qwertyui-1eb9f.firebaseapp.com",
@@ -64,26 +89,39 @@ const db = getFirestore(app);
 const auth = getAuth(app);
 const provider = new GoogleAuthProvider();
 
+// === Элементы DOM ===
 const loginBtn = document.getElementById("loginBtn");
 const logoutBtn = document.getElementById("logoutBtn");
-const postContainer = document.getElementById("postContainer");
-const publishBtn = document.getElementById("publishBtn");
-const feed = document.getElementById("feed");
-const chatContainer = document.getElementById("chatContainer");
+const tabs = document.getElementById("tabs");
+const myPostsTab = document.getElementById("myPostsTab");
+const feedTab = document.getElementById("feedTab");
+const chatTab = document.getElementById("chatTab");
+
+const myPostsSection = document.getElementById("myPostsSection");
+const feedSection = document.getElementById("feedSection");
+const chatSection = document.getElementById("chatSection");
+
+const createPostBtn = document.getElementById("createPostBtn");
+const myPosts = document.getElementById("myPosts");
+const feedPosts = document.getElementById("feedPosts");
+
 const chatBox = document.getElementById("chatBox");
+const messageInput = document.getElementById("messageInput");
 const sendBtn = document.getElementById("sendBtn");
 
 let currentChatId = null;
+let unsubscribeMessages = null;
 
-// ===== AUTH =====
+// === AUTH ===
 loginBtn.onclick = () => signInWithPopup(auth, provider);
 logoutBtn.onclick = () => signOut(auth);
 
 onAuthStateChanged(auth, async user => {
   if (user) {
     loginBtn.style.display = "none";
-    logoutBtn.style.display = "block";
-    postContainer.style.display = "block";
+    logoutBtn.style.display = "inline-block";
+    tabs.style.display = "block";
+    showSection('myPosts');
 
     // сохраняем пользователя
     await setDoc(doc(db, "users", user.uid), {
@@ -94,107 +132,167 @@ onAuthStateChanged(auth, async user => {
       createdAt: serverTimestamp()
     }, { merge:true });
 
-    loadPosts();
-
+    loadMyPosts();
+    loadFeed();
   } else {
-    loginBtn.style.display = "block";
+    loginBtn.style.display = "inline-block";
     logoutBtn.style.display = "none";
-    postContainer.style.display = "none";
+    tabs.style.display = "none";
+    hideAllSections();
   }
 });
 
-// ===== СОЗДАТЬ ТЕСТОВЫЙ ПОСТ =====
-publishBtn.onclick = async () => {
+// === Tabs ===
+myPostsTab.onclick = () => showSection('myPosts');
+feedTab.onclick = () => showSection('feed');
+chatTab.onclick = () => showSection('chat');
+
+function showSection(section) {
+  hideAllSections();
+  if(section==='myPosts') myPostsSection.style.display='block';
+  if(section==='feed') feedSection.style.display='block';
+  if(section==='chat') chatSection.style.display='block';
+  // активная кнопка
+  [myPostsTab, feedTab, chatTab].forEach(b => b.classList.remove('active'));
+  if(section==='myPosts') myPostsTab.classList.add('active');
+  if(section==='feed') feedTab.classList.add('active');
+  if(section==='chat') chatTab.classList.add('active');
+}
+
+function hideAllSections() {
+  myPostsSection.style.display='none';
+  feedSection.style.display='none';
+  chatSection.style.display='none';
+}
+
+// === Создать пост ===
+createPostBtn.onclick = async () => {
+  const text = prompt("Введите текст поста:");
+  if(!text) return;
   const user = auth.currentUser;
   await addDoc(collection(db, "requests"), {
     uid: user.uid,
     name: user.displayName,
     email: user.email,
+    text,
+    likes: [],
+    views: [],
     timestamp: serverTimestamp()
   });
 };
 
-// ===== ЛЕНТА =====
-function loadPosts() {
+// === Мои посты ===
+function loadMyPosts() {
+  const user = auth.currentUser;
+  if(!user) return;
   const q = query(collection(db, "requests"), orderBy("timestamp", "desc"));
-
-  onSnapshot(q, snapshot => {
-    feed.innerHTML = "";
-    snapshot.forEach(docItem => {
+  onSnapshot(q, snapshot=>{
+    myPosts.innerHTML='';
+    snapshot.forEach(docItem=>{
       const data = docItem.data();
+      if(data.uid!==user.uid) return; // только мои посты
       const div = document.createElement("div");
-      div.className = "post";
-      div.innerHTML = `
+      div.className='post';
+      div.innerHTML=`
         <b>${data.name}</b><br>
-        ${data.email}<br>
-        <button onclick="openChat('${data.uid}')">💬 Написать</button>
+        ${data.text}<br>
+        Лайки: ${data.likes ? data.likes.length : 0}<br>
+        Кто заходил: ${data.views ? data.views.length : 0}
+        <div class="post-actions">
+          <button onclick="deletePost('${docItem.id}')">🗑 Удалить</button>
+        </div>
       `;
-      feed.appendChild(div);
+      myPosts.appendChild(div);
     });
   });
 }
 
-// ===== ОТКРЫТЬ ЧАТ =====
-window.openChat = async (receiverUid) => {
+// === Лента других пользователей ===
+function loadFeed() {
   const user = auth.currentUser;
-  if (receiverUid === user.uid) return alert("Нельзя писать себе");
-
-  const chatId = [user.uid, receiverUid].sort().join("_");
-  currentChatId = chatId;
-
-  const chatRef = doc(db, "chats", chatId);
-  const chatSnap = await getDoc(chatRef);
-
-  if (!chatSnap.exists()) {
-    await setDoc(chatRef, {
-      participants: [user.uid, receiverUid],
-      lastMessage: "",
-      updatedAt: serverTimestamp()
+  if(!user) return;
+  const q = query(collection(db, "requests"), orderBy("timestamp","desc"));
+  onSnapshot(q, snapshot=>{
+    feedPosts.innerHTML='';
+    snapshot.forEach(docItem=>{
+      const data = docItem.data();
+      if(data.uid===user.uid) return; // исключаем себя
+      const div = document.createElement("div");
+      div.className='post';
+      div.innerHTML=`
+        <b>${data.name}</b><br>
+        ${data.text}<br>
+        Лайки: ${data.likes ? data.likes.length : 0}<br>
+        <div class="post-actions">
+          <button onclick="openChat('${data.uid}')">💬 Написать</button>
+          <button onclick="likePost('${docItem.id}')">❤️ Лайк</button>
+        </div>
+      `;
+      feedPosts.appendChild(div);
     });
-  }
+  });
+}
 
-  chatContainer.style.display = "block";
-  loadMessages(chatId);
+// === Лайк поста ===
+window.likePost = async (postId)=>{
+  const user = auth.currentUser;
+  if(!user) return;
+  await updateDoc(doc(db, "requests", postId), {
+    likes: arrayUnion(user.uid)
+  });
 };
 
-// ===== ЗАГРУЗКА СООБЩЕНИЙ =====
-function loadMessages(chatId) {
-  const q = query(
-    collection(db, "chats", chatId, "messages"),
-    orderBy("timestamp", "asc")
-  );
+// === Удаление поста ===
+window.deletePost = async (postId)=>{
+  try{
+    await deleteDoc(doc(db, "requests", postId));
+  }catch(err){ alert(err.message); }
+};
 
-  onSnapshot(q, snapshot => {
-    chatBox.innerHTML = "";
-    snapshot.forEach(doc => {
+// === Открыть чат ===
+window.openChat = async (receiverUid)=>{
+  const user = auth.currentUser;
+  if(receiverUid===user.uid) return alert("Нельзя писать себе");
+  currentChatId=[user.uid,receiverUid].sort().join("_");
+  const chatRef = doc(db,"chats",currentChatId);
+  const chatSnap = await getDoc(chatRef);
+  if(!chatSnap.exists()){
+    await setDoc(chatRef,{participants:[user.uid,receiverUid],lastMessage:"",updatedAt:serverTimestamp()});
+  }
+  showSection('chat');
+  loadMessages(currentChatId);
+};
+
+// === Загрузка сообщений ===
+function loadMessages(chatId){
+  if(unsubscribeMessages) unsubscribeMessages();
+  const q = query(collection(db,"chats",chatId,"messages"),orderBy("timestamp","asc"));
+  unsubscribeMessages = onSnapshot(q,snapshot=>{
+    chatBox.innerHTML='';
+    snapshot.forEach(doc=>{
       const data = doc.data();
       const p = document.createElement("p");
-      p.className = data.senderId === auth.currentUser.uid ? "my" : "other";
-      p.textContent = data.text;
+      p.className = data.senderId===auth.currentUser.uid?'my':'other';
+      p.textContent=data.text;
       chatBox.appendChild(p);
     });
+    chatBox.scrollTop=chatBox.scrollHeight;
   });
 }
 
-// ===== ОТПРАВКА =====
-sendBtn.onclick = async () => {
-  const input = document.getElementById("messageInput");
-  const text = input.value.trim();
-  if (!text) return;
-
-  await addDoc(collection(db, "chats", currentChatId, "messages"), {
+// === Отправка сообщений ===
+sendBtn.onclick = async ()=>{
+  if(!currentChatId) return alert("Чат не выбран");
+  const text = messageInput.value.trim();
+  if(!text) return;
+  await addDoc(collection(db,"chats",currentChatId,"messages"),{
     text,
-    senderId: auth.currentUser.uid,
-    timestamp: serverTimestamp()
+    senderId:auth.currentUser.uid,
+    timestamp:serverTimestamp()
   });
-
-  await updateDoc(doc(db, "chats", currentChatId), {
-    lastMessage: text,
-    updatedAt: serverTimestamp()
-  });
-
-  input.value = "";
+  await updateDoc(doc(db,"chats",currentChatId),{lastMessage:text,updatedAt:serverTimestamp()});
+  messageInput.value='';
 };
 </script>
 </body>
-</html> что не так здесь вот еше код rules_version = '2';
+</html>
